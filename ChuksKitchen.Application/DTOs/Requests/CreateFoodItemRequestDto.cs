@@ -16,7 +16,7 @@ public class CreateFoodItemRequestDto
     [Range(0.01, 100000, ErrorMessage = "Price must be between 0.01 and 100,000")]
     public decimal Price { get; set; }
 
-    [Url(ErrorMessage = "Invalid URL format")]
+    [HttpsUrl(ErrorMessage = "Image URL must start with https:// (e.g., https://example.com/image.jpg)")]
     public string? ImageUrl { get; set; }
 
     [Required(ErrorMessage = "Category is required")]
