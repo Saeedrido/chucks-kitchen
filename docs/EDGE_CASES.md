@@ -9,15 +9,8 @@ This document details all edge cases handled in the Chuks Kitchen system.
 ### Duplicate Email or Phone
 **Scenario:** User tries to register with existing email/phone
 
-**Detection:**
-```csharp
-var existingUser = await _userRepository.GetByEmailOrPhoneAsync(email, phone);
-if (existingUser != null)
-    return ErrorResponse("Email/Phone already registered");
-```
-
 **Handling:**
-- ✅ Check both email and phone
+- ✅ Check both email and phone for duplicates
 - ✅ Return specific error message
 - ✅ Prevent duplicate registration
 
@@ -26,519 +19,349 @@ if (existingUser != null)
 ### Invalid or Expired OTP
 **Scenario:** User enters wrong or expired OTP code
 
-**Detection:**
-```csharp
-// Check expiry
-if (user.OtpExpiry < DateTime.UtcNow)
-    return ErrorResponse("OTP has expired");
-
-// Check match
-if (user.OtpCode != inputOtp)
-    return ErrorResponse("Invalid OTP");
-```
-
 **Handling:**
 - ✅ OTP expires after 10 minutes
-- ✅ OTP valid from generation: 5 minutes
 - ✅ Failed attempts tracked (max 3)
-- ✅ Account locked after failures
-- ✅ Clear error messages
+- ✅ Account locked after 3 failed attempts
+- ✅ Clear error messages for each case
 
 ---
 
 ### Invalid Referral Code
 **Scenario:** User enters referral code that doesn't exist
 
-**Detection:**
-```csharp
-var referrer = await _userRepository.GetByEmailAsync(referralCode);
-if (referrer == null)
-    return ErrorResponse("Invalid referral code");
-```
-
 **Handling:**
-- ✅ Validate referral exists
-- ✅ Referral must be existing user's email
-- ✅ Store referral relationship
-- ✅ Prevent registration with invalid code
+- ✅ Validate referral code against database
+- ✅ Allow registration to continue without referral
+- ✅ Inform user of invalid code
 
 ---
 
-### User Abandons Signup
-**Scenario:** User registers but never verifies OTP
-
-**Detection:**
-- User has `IsVerified = false`
-- OTP has expired
+### Account Lockout
+**Scenario:** User enters wrong OTP 3 times
 
 **Handling:**
-- ✅ User can request new OTP
-- ✅ Old OTP invalidated
-- ✅ Failed attempts reset
-- ✅ User can complete verification later
+- ✅ Account locked after 3 failed attempts
+- ✅ User must generate new OTP to unlock
+- ✅ Clear message about lockout
 
 ---
 
-### Too Many Failed OTP Attempts
-**Scenario:** User enters wrong OTP multiple times
+## 2. Food & Inventory Edge Cases
 
-**Detection:**
-```csharp
-user.FailedOtpAttempts++;
-if (user.FailedOtpAttempts >= 3)
-    return ErrorResponse("Too many failed attempts");
-```
+### Out of Stock
+**Scenario:** User tries to add unavailable food to cart
 
 **Handling:**
-- ✅ Counter incremented on each failure
-- ✅ Account locked after 3 attempts
-- ✅ User must request new OTP
-- ✅ Counter reset on new OTP
+- ✅ Check stock quantity before adding
+- ✅ Return error if insufficient stock
+- ✅ Show available quantity to user
 
 ---
 
-## 2. Food Management Edge Cases
-
-### Food Becomes Unavailable After Added to Cart
-**Scenario:** User adds item to cart, admin marks it unavailable
-
-**Detection:**
-```csharp
-if (!cartItem.FoodItem.IsAvailable)
-    return ErrorResponse("Food item is now unavailable");
-```
+### Food Becomes Unavailable
+**Scenario:** Food was in cart but became unavailable
 
 **Handling:**
-- ✅ Detected on cart operations
-- ✅ Error message returned
-- ✅ User must remove item
-- ✅ Cannot checkout with unavailable items
+- ✅ Validate availability at order placement
+- ✅ Remove unavailable items from cart
+- ✅ Inform user of removed items
+- ✅ Allow order with remaining items
 
 ---
 
-### Price Updates While Item in Cart
-**Scenario:** Admin updates food price while item is in user's cart
-
-**Detection:**
-- CartItem stores `UnitPrice` at time of adding
-- Changes in FoodItem.Price don't affect cart
+### Price Changes
+**Scenario:** Food price changes after adding to cart
 
 **Handling:**
-- ✅ Cart maintains original price
-- ✅ Order uses cart price
-- ✅ Price changes only affect future additions
-
----
-
-### Out of Stock Situation
-**Scenario:** Food item stock reaches zero
-
-**Detection:**
-```csharp
-if (foodItem.StockQuantity < requestedQuantity)
-    return ErrorResponse($"Only {foodItem.StockQuantity} available");
-```
-
-**Handling:**
-- ✅ Check stock on add to cart
-- ✅ Check stock on update cart
-- ✅ Check stock on place order
-- ✅ Prevent over-ordering
-- ✅ Clear messaging
+- ✅ Snapshot price at cart addition time
+- ✅ Use cart price for order calculation
+- ✅ Update to current price on next addition
 
 ---
 
 ## 3. Cart Management Edge Cases
 
-### Duplicate Items in Cart
-**Scenario:** User adds same item multiple times
-
-**Detection:**
-```csharp
-var existingItem = cart.CartItems.FirstOrDefault(ci => ci.FoodItemId == foodItemId);
-if (existingItem != null)
-    existingItem.Quantity += newQuantity;
-```
+### Duplicate Cart Items
+**Scenario:** User adds same food item twice
 
 **Handling:**
-- ✅ Check for existing item
-- ✅ Merge quantities instead of duplicate
-- ✅ Validate stock for merged quantity
-- ✅ Maintain single cart item
+- ✅ Merge items (increase quantity)
+- ✅ Keep original special instructions
+- ✅ Update unit price snapshot
 
 ---
 
-### Stock Depletion After Cart Addition
-**Scenario:** Multiple users order same item, stock runs out
-
-**Detection:**
-```csharp
-// On order placement
-if (foodItem.StockQuantity < cartItem.Quantity)
-    return ErrorResponse("Insufficient stock");
-```
+### Cart Abandonment
+**Scenario:** User adds items but doesn't checkout
 
 **Handling:**
-- ✅ Stock reserved on order placement
-- ✅ Later orders fail if stock insufficient
-- ✅ Users informed to update cart
-- ✅ Real-time stock validation
+- ✅ Cart persists in database
+- ✅ No automatic cleanup (per requirements)
+- ✅ Cart available on next login
 
 ---
 
 ### Empty Cart Checkout
 **Scenario:** User tries to place order with empty cart
 
-**Detection:**
-```csharp
-if (!cart.CartItems.Any())
-    return ErrorResponse("Your cart is empty");
-```
-
 **Handling:**
+- ✅ Validate cart has items before order
+- ✅ Return error: "Cart is empty"
 - ✅ Prevent order creation
-- ✅ Clear error message
-- ✅ User must add items first
 
 ---
 
-### Invalid Quantity Update
-**Scenario:** User tries to set quantity to 0 or negative
-
-**Detection:**
-```csharp
-if (quantity <= 0)
-    return ErrorResponse("Quantity must be greater than 0");
-```
+### Quantity Updates
+**Scenario:** User updates quantity to zero or negative
 
 **Handling:**
 - ✅ Validate quantity > 0
-- ✅ To remove, use delete endpoint
-- ✅ Clear validation message
+- ✅ Remove item if quantity becomes 0
+- ✅ Return error for negative values
 
 ---
 
-## 4. Order Processing Edge Cases
+## 4. Order Placement Edge Cases
 
-### Payment Not Completed
-**Scenario:** Order created but payment fails/abandoned
-
-**Detection:**
-- Order has `IsPaid = false`
-- Status remains Pending
+### Concurrent Order Placement
+**Scenario:** Two users order last item simultaneously
 
 **Handling:**
-- ✅ Order exists with Pending status
-- ✅ Stock already reserved
-- ✅ Admin can cancel unpaid orders
-- ✅ Stock restored on cancellation
-
-**Future Enhancement:**
-- Payment timeout auto-cancellation
-- Payment webhook integration
+- ✅ Stock reserved immediately on validation
+- ✅ First order succeeds, second fails
+- ✅ Clear error for insufficient stock
+- ✅ Restore stock on order cancellation
 
 ---
 
-### Admin Cancels Order
-**Scenario:** Admin needs to cancel customer order
-
-**Detection:**
-```csharp
-// Admin has authority to cancel any order
-await _orderService.UpdateOrderStatusAsync(orderId, cancelledStatus);
-```
+### Invalid Delivery Address
+**Scenario:** User provides empty or invalid address
 
 **Handling:**
-- ✅ Admin can cancel any order
-- ✅ Stock automatically restored
-- ✅ Cancellation reason recorded
-- ✅ Customer notified (future)
+- ✅ Validate address not empty
+- ✅ Validate minimum length (10 chars)
+- ✅ Return specific error message
 
 ---
 
-### Customer Cancels Order
-**Scenario:** Customer wants to cancel their order
-
-**Detection:**
-```csharp
-// User can only cancel own orders
-// Only Pending/Confirmed orders
-if (order.Status != Pending && order.Status != Confirmed)
-    return ErrorResponse("Cannot cancel in current status");
-```
+### Order Number Generation
+**Scenario:** Multiple orders created at same time
 
 **Handling:**
-- ✅ User can cancel own orders only
-- ✅ Only Pending/Confirmed can be cancelled
-- ✅ Stock restored automatically
-- ✅ Cancellation reason saved
-- ✅ Cannot cancel if preparing or later
+- ✅ Unique order number format: CK + timestamp + random
+- ✅ 6-digit random suffix prevents collision
+- ✅ Database uniqueness constraint
 
 ---
 
-### Order Status Validation
-**Scenario:** Invalid status transition attempted
+## 5. Order Status Edge Cases
 
-**Detection:**
-```csharp
-if (!IsValidStatusTransition(current, next))
-    return ErrorResponse($"Invalid transition from {current} to {next}");
-```
+### Invalid Status Transitions
+**Scenario:** Admin tries invalid status change
 
 **Valid Transitions:**
 ```
-Pending → Confirmed, Cancelled
-Confirmed → Preparing, Cancelled
-Preparing → OutForDelivery
-OutForDelivery → Completed
+Pending → Confirmed → Preparing → OutForDelivery → Completed
+                     ↓
+                  Cancelled
 ```
 
 **Handling:**
-- ✅ All invalid transitions rejected
-- ✅ Clear error message
-- ✅ Admin informed of valid options
+- ✅ Validate all status transitions
+- ✅ Return error for invalid transitions
+- ✅ Prevent backward moves (except cancellation)
 
 ---
 
-## 5. Data Integrity Edge Cases
+### Cancellation Rules
+**Scenario:** Customer or Admin tries to cancel order
 
-### Concurrent Orders
-**Scenario:** Multiple users order same item simultaneously
+**Rules:**
+- ✅ Customer can cancel: Pending, Confirmed
+- ✅ Admin can cancel: Any status before Completed
+- ✅ Cannot cancel: Completed orders
+- ✅ Stock restored on cancellation
 
-**Detection:**
-- Database transactions
-- Stock checks with locks
+---
+
+### Status Timestamp Tracking
+**Scenario:** Order status changes multiple times
 
 **Handling:**
-- ✅ First successful order reserves stock
-- ✅ Subsequent orders fail stock check
-- ✅ Users receive clear error
-- ✅ No overselling
+- ✅ Timestamp for each status change
+- ✅ Status history maintained
+- ✅ Can track order journey
 
 ---
 
-### Soft Delete Implementation
-**Scenario:** Admin deletes food item with existing orders
+## 6. Payment Edge Cases
 
-**Detection:**
-```csharp
-// Soft delete - set IsDeleted = true
-foodItem.IsDeleted = true;
-await _repository.Update(foodItem);
-```
+### Payment Failure
+**Scenario:** Payment fails after order creation
 
 **Handling:**
-- ✅ Item marked as deleted
-- ✅ Existing orders preserve data
-- ✅ Item not shown in new queries
-- ✅ Historical data intact
+- ✅ Order created in Pending status
+- ✅ Admin must confirm before processing
+- ✅ No auto-cancellation (manual process)
 
 ---
 
-### Orphaned Records
-**Scenario:** User deleted but orders exist
-
-**Detection:**
-- Foreign key constraints
-- Cascade rules
+### Payment Timeout
+**Scenario:** User doesn't complete payment
 
 **Handling:**
-- ✅ Orders have UserId (required)
-- ✅ User cannot be hard deleted
-- ✅ Use soft delete for users
-- ✅ Maintain referential integrity
+- ✅ Order remains in Pending status
+- ✅ No automatic timeout (per requirements)
+- ✅ Admin can cancel stale orders
 
 ---
 
-## 6. API Communication Edge Cases
+## 7. Data Integrity Edge Cases
+
+### Orphaned Cart Items
+**Scenario:** Food deleted but exists in cart
+
+**Handling:**
+- ✅ Soft delete on food items
+- ✅ Validate food exists on cart access
+- ✅ Remove invalid items on order placement
+
+---
+
+### User Deletion
+**Scenario:** User account deleted
+
+**Handling:**
+- ✅ Soft delete on user accounts
+- ✅ Orders preserved (historical data)
+- ✅ Cart preserved for reporting
+
+---
+
+### Database Connection Loss
+**Scenario:** Database becomes unavailable
+
+**Handling:**
+- ✅ Global exception handler catches errors
+- ✅ User-friendly error message
+- ✅ Detailed error in development mode
+- ✅ Logs error for investigation
+
+---
+
+## 8. API Edge Cases
 
 ### Missing Headers
-**Scenario:** Request without userId header
-
-**Detection:**
-```csharp
-[FromHeader] int userId
-// Returns 400 if header missing
-```
+**Scenario:** Required headers not provided
 
 **Handling:**
-- ✅ Model validation catches missing headers
-- ✅ Returns 400 Bad Request
+- ✅ Validate userId header where required
+- ✅ Validate adminId header for admin operations
+- ✅ Return 401 Unauthorized for missing auth
+
+---
+
+### Invalid JSON
+**Scenario:** Malformed request body
+
+**Handling:**
+- ✅ Automatic model validation
 - ✅ Clear error message
+- ✅ HTTP 400 Bad Request
 
 ---
 
-### Malformed JSON
-**Scenario:** Invalid JSON in request body
-
-**Detection:**
-- ASP.NET Core model binding
-- Automatic validation
+### Large Payloads
+**Scenario:** Very large request body
 
 **Handling:**
-- ✅ Returns 400 Bad Request
-- ✅ Validation errors in response
-- ✅ User informed of format issues
+- ✅ ASP.NET Core default size limits
+- ✅ Returns 413 Payload Too Large
+- ✅ Prevents DOS attacks
 
 ---
 
-### Large Payload
-**Scenario:** Request body too large
+## 9. Concurrency Edge Cases
 
-**Detection:**
-- Request size limits
-- ASP.NET Core middleware
+### Race Conditions
+**Scenario:** Multiple requests modify same data
 
 **Handling:**
-- ✅ Request rejected
-- ✅ 413 Payload Too Large
-- ✅ No processing attempted
+- ✅ Database transaction isolation
+- ✅ First-write-wins for stock updates
+- ✅ Optimistic concurrency for critical updates
 
 ---
 
-## 7. Database Edge Cases
-
-### Connection Failure
-**Scenario:** Database unavailable
-
-**Detection:**
-```csharp
-try {
-    await _context.SaveChangesAsync();
-} catch (DbUpdateException ex) {
-    _logger.LogError(ex, "Database error");
-    return ErrorResponse("Database operation failed");
-}
-```
+### Stale Data
+**Scenario:** Data changes between read and write
 
 **Handling:**
-- ✅ Exceptions caught and logged
-- ✅ User-friendly error returned
-- ✅ No data corruption
-- ✅ Retry possible
+- ✅ Re-validate on write operations
+- ✅ Use database constraints
+- ✅ Clear error on conflict
 
 ---
 
-### Constraint Violation
-**Scenario:** Unique constraint violated
+## 10. Security Edge Cases
 
-**Detection:**
-- Database unique constraints
-- EF Core tracking
+### Brute Force Attacks
+**Scenario:** Multiple login attempts
 
 **Handling:**
-- ✅ Duplicate keys detected
-- ✅ Specific error returned
-- ✅ Rollback changes
-- ✅ No partial updates
+- ✅ Password hashed with BCrypt
+- ✅ No account lockout on password (per requirements)
+- ✅ OTP lockout after 3 attempts
+- ✅ Consider rate limiting (future enhancement)
 
 ---
-
-### Transaction Timeout
-**Scenario:** Long-running operation
-
-**Detection:**
-- Command timeout configured
-- EF Core timeouts
-
-**Handling:**
-- ✅ Timeout exception caught
-- ✅ Transaction rolled back
-- ✅ Error logged
-- ✅ User notified
-
----
-
-## 8. Security Edge Cases
 
 ### SQL Injection
-**Scenario:** Malicious input in queries
+**Scenario:** Malicious input in fields
 
-**Prevention:**
+**Handling:**
 - ✅ Parameterized queries (EF Core)
-- ✅ No raw SQL concatenation
+- ✅ Input validation on all fields
+- ✅ No raw SQL queries
+
+---
+
+### XSS Attacks
+**Scenario:** Script tags in user input
+
+**Handling:**
 - ✅ Input validation
+- ✅ Output encoding in responses
+- ✅ No HTML in API responses
 
 ---
 
-### Password Storage
-**Scenario:** Storing user passwords
+## Summary
 
-**Prevention:**
-```csharp
-// SHA256 hashing
-var hash = sha256.ComputeHash(bytes);
-return Convert.ToBase64String(hash);
-```
+**Total Edge Cases Handled:** 30+
 
-- ✅ Passwords never stored in plain text
-- ✅ One-way hash (cannot decrypt)
-- ✅ Salt added (production)
+**Categories:**
+- Authentication (5 cases)
+- Food & Inventory (3 cases)
+- Cart Management (4 cases)
+- Order Placement (3 cases)
+- Order Status (3 cases)
+- Payment (2 cases)
+- Data Integrity (3 cases)
+- API (3 cases)
+- Concurrency (2 cases)
+- Security (3 cases)
 
----
-
-### Unauthorized Access
-**Scenario:** User accessing another user's data
-
-**Prevention:**
-```csharp
-var order = await _orderRepository.GetUserOrderAsync(userId, orderId);
-if (order == null)
-    return ErrorResponse("Order not found");
-```
-
-- ✅ Users only see own data
-- ✅ Admins see all data
-- ✅ ID validation enforced
+**All edge cases include:**
+- ✅ Detection logic
+- ✅ Clear error messages
+- ✅ User-friendly handling
+- ✅ Logging for debugging
 
 ---
 
-## Summary of Edge Cases
-
-### Authentication (5 cases)
-- ✅ Duplicate email/phone
-- ✅ Invalid/expired OTP
-- ✅ Invalid referral code
-- ✅ Abandoned signup
-- ✅ Failed OTP attempts
-
-### Food Management (3 cases)
-- ✅ Unavailable after cart addition
-- ✅ Price updates in cart
-- ✅ Out of stock
-
-### Cart Management (4 cases)
-- ✅ Duplicate items
-- ✅ Stock depletion
-- ✅ Empty cart checkout
-- ✅ Invalid quantity
-
-### Order Processing (4 cases)
-- ✅ Payment not completed
-- ✅ Admin cancellation
-- ✅ Customer cancellation
-- ✅ Invalid status transitions
-
-### Data Integrity (3 cases)
-- ✅ Concurrent orders
-- ✅ Soft delete
-- ✅ Orphaned records
-
-### API Communication (3 cases)
-- ✅ Missing headers
-- ✅ Malformed JSON
-- ✅ Large payload
-
-### Database (3 cases)
-- ✅ Connection failure
-- ✅ Constraint violation
-- ✅ Transaction timeout
-
-### Security (3 cases)
-- ✅ SQL injection
-- ✅ Password storage
-- ✅ Unauthorized access
-
----
-
-**Total Edge Cases Handled: 28+**
+**For more details, see the source code in:**
+- `/ChuksKitchen.Application/Services/`
+- `/ChuksKitchen.API/Controllers/`
+- `/ChuksKitchen.API/Middleware/`

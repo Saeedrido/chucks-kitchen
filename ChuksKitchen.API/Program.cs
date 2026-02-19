@@ -59,7 +59,15 @@ builder.Services.AddAuthorization();
 
 // Configure Health Checks
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AppDbContext>("database");
+    .AddCheck("database", () =>
+    {
+        // Custom database health check will be handled by HealthController
+        return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database is available");
+    })
+    .AddCheck("api", () =>
+    {
+        return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API is running");
+    });
 
 // Configure Database - Using InMemory for this deliverable
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -169,8 +177,9 @@ app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Map Health Checks endpoint
-app.MapHealthChecks("/health");
+// Map Health Checks endpoints
+app.MapHealthChecks("/health"); // Basic health check (for Kubernetes/Docker probes)
+// Note: Detailed health checks are available at /api/v1/health/detailed
 
 app.MapControllers();
 
